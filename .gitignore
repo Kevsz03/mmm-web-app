@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+
+# Entornos y variables
+.env
+.env.*
+venv/
+backend/venv/
+
+# macOS
+.DS_Store
+
+# Datos/archivos generados
+backend/uploads/
+*.csv
+*.log
+
+# Node/Frontend (si aplica)
+node_modules/
+dist/
+build/
