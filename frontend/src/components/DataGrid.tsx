@@ -1,10 +1,9 @@
-import { useState, useEffect } from 'react';
 import { cn } from '../lib/utils';
-import { ChevronRight, ChevronsRight, HelpCircle, MousePointerClick } from 'lucide-react';
+import { MousePointerClick } from 'lucide-react';
 
 interface Props {
   columns: string[];
-  data: any[];
+  data: Array<Record<string, unknown>>;
   config: {
     dateCol: string;
     targetCol: string;
@@ -96,7 +95,7 @@ export const DataGrid = ({ columns, data, config, selectionMode, onColumnClick }
                   "px-4 py-2 border-b border-r border-slate-100 truncate max-w-[200px] group-hover:border-slate-200 transition-colors",
                   getCellColor(col)
                 )}>
-                  {row[col]}
+                  {String((row as Record<string, unknown>)[col] ?? '')}
                 </td>
               ))}
             </tr>

@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Upload, X } from 'lucide-react';
+import { Upload } from 'lucide-react';
 import { useCallback, useState } from 'react';
 
 interface Props {
@@ -65,7 +65,7 @@ export const FileUpload = ({ onFileSelect, accept }: Props) => {
           Arrastra y suelta tu archivo aquí
         </h3>
         <p className="text-slate-500 mb-10 text-base max-w-sm mx-auto leading-relaxed">
-          Soporta archivos <span className="font-semibold text-slate-700">.CSV</span> y <span className="font-semibold text-slate-700">.XLSX</span> con tus datos históricos.
+          Soporta archivos <span className="font-semibold text-slate-700">.CSV</span>, <span className="font-semibold text-slate-700">.XLSX</span> y <span className="font-semibold text-slate-700">.XLS</span> con tus datos históricos.
         </p>
         
         <label className="relative overflow-hidden group inline-flex items-center px-8 py-4 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-xl cursor-pointer transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 active:translate-y-0">

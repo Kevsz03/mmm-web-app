@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Upload, FileText, BarChart2, Settings, Download, CheckCircle, AlertCircle, ChevronRight, Plus, Trash, HelpCircle, ArrowLeft, Loader2, LayoutGrid, Zap, PieChart, Database, Eye, X, TrendingUp, DollarSign } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area, BarChart, Bar, Brush, Cell } from 'recharts';
+import { BarChart2, Settings, Download, AlertCircle, HelpCircle, LayoutGrid, Zap, PieChart, Database, Eye, X, TrendingUp, DollarSign } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area, BarChart, Bar, Brush } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 import { HowItWorks } from './components/HowItWorks';
 import { MetricCard } from './components/MetricCard';
@@ -67,11 +67,11 @@ function App() {
   const [baseModels, setBaseModels] = useState<any>(null);
   const [selectedBaseModel, setSelectedBaseModel] = useState<string>('Ridge');
   const [priors, setPriors] = useState<any[]>([]);
-  const [ridgeAlpha, setRidgeAlpha] = useState(1.0);
+  const [ridgeAlphaOptions, setRidgeAlphaOptions] = useState<number[]>([0.1, 0.5, 1, 2, 5, 10]);
+  const [selectedRidgeAlpha, setSelectedRidgeAlpha] = useState<number>(1.0);
   
   // Results State
   const [results, setResults] = useState<any>(null);
-  const [activeVariation, setActiveVariation] = useState<string>('Ridge'); // Default to Ridge
   const [resultTab, setResultTab] = useState('overview');
   
   // Prediction / Optimization State
@@ -127,8 +127,9 @@ function App() {
       // Fetch preview data
       const previewRes = await axios.get(`${API_URL}/data/preview`);
       setPreviewData(previewRes.data.data);
-    } catch (err) {
-      setError('Error al subir el archivo. Asegúrate de que sea un archivo CSV o Excel válido.');
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      setError(detail ? `Error al subir el archivo: ${detail}` : 'Error al subir el archivo. Asegúrate de que sea un archivo CSV o Excel válido.');
       console.error(err);
     }
   };
@@ -212,7 +213,8 @@ function App() {
         target_col: config.targetCol,
         media_config: config.mediaChannels,
         control_cols: config.controlCols,
-        ridge_alpha: ridgeAlpha
+      ridge_alpha: 1.0,
+      ridge_alphas: ridgeAlphaOptions
       });
       
       setBaseModels(res.data.models);
@@ -221,7 +223,17 @@ function App() {
       const defaultModel = res.data.models['Ridge'] ? 'Ridge' : Object.keys(res.data.models)[0];
       setSelectedBaseModel(defaultModel);
       
-      const stats = res.data.models[defaultModel].stats;
+    let stats = res.data.models[defaultModel].stats;
+    if (defaultModel === 'Ridge' && res.data.models['Ridge'].solutions) {
+        const solutionKeys = Object.keys(res.data.models['Ridge'].solutions);
+        const alphas = solutionKeys.map(a => parseFloat(a));
+        setRidgeAlphaOptions(alphas);
+        const defAlpha = res.data.models['Ridge'].ridge_alpha || alphas[0];
+        setSelectedRidgeAlpha(defAlpha);
+        
+        const stringKey = solutionKeys.find(k => parseFloat(k) === defAlpha) || solutionKeys[0];
+        stats = res.data.models['Ridge'].solutions[stringKey].stats;
+    }
       const initialPriors = stats.map((s: any) => ({
           canal: s.canal,
           initial_value: s.beta,
@@ -231,13 +243,16 @@ function App() {
           t_value: s.t_value,
           contribution: s.contribution,
           abs_contribution: s.abs_contribution,
-          pct_contribution: s.pct_contribution
+          pct_contribution: s.pct_contribution,
+          total_activity: s.total_activity,
+          total_spend: s.total_spend
       }));
       setPriors(initialPriors);
       
       setStep('base_models');
-    } catch (err) {
-      setError('Error al entrenar los modelos base.');
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      setError(detail ? `Error al entrenar los modelos base: ${detail}` : 'Error al entrenar los modelos base.');
       setStep('studio');
       console.error(err);
     }
@@ -246,7 +261,13 @@ function App() {
   const handleBaseModelChange = (method: string) => {
       setSelectedBaseModel(method);
       if (baseModels && baseModels[method]) {
-          const stats = baseModels[method].stats;
+          let stats = baseModels[method].stats;
+          if (method === 'Ridge' && baseModels['Ridge'].solutions) {
+              const alpha = selectedRidgeAlpha || baseModels['Ridge'].ridge_alpha;
+              const solutionKeys = Object.keys(baseModels['Ridge'].solutions);
+              const stringKey = solutionKeys.find(k => parseFloat(k) === alpha) || solutionKeys[0];
+              stats = baseModels['Ridge'].solutions[stringKey].stats;
+          }
           const updatedPriors = stats.map((s: any) => {
               const existingPrior = priors.find(p => p.canal === s.canal);
               return {
@@ -258,26 +279,75 @@ function App() {
                   t_value: s.t_value,
                   contribution: s.contribution,
                   abs_contribution: s.abs_contribution,
-                  pct_contribution: s.pct_contribution
+                  pct_contribution: s.pct_contribution,
+                  total_activity: s.total_activity,
+                  total_spend: s.total_spend
               };
           });
           setPriors(updatedPriors);
       }
   };
 
+  const handleRidgeAlphaChange = (alpha: number) => {
+      setSelectedRidgeAlpha(alpha);
+      if (baseModels && baseModels['Ridge'] && baseModels['Ridge'].solutions) {
+          const solutionKeys = Object.keys(baseModels['Ridge'].solutions);
+          const stringKey = solutionKeys.find(k => parseFloat(k) === alpha) || solutionKeys[0];
+          const stats = baseModels['Ridge'].solutions[stringKey].stats;
+          const updatedPriors = stats.map((s: any) => {
+              const existingPrior = priors.find(p => p.canal === s.canal);
+              return {
+                  canal: s.canal,
+                  initial_value: s.beta,
+                  SE: s.se || 1.0,
+                  df: existingPrior ? existingPrior.df : 0.95,
+                  vif: s.vif,
+                  t_value: s.t_value,
+                  contribution: s.contribution,
+                  abs_contribution: s.abs_contribution,
+                  pct_contribution: s.pct_contribution,
+                  total_activity: s.total_activity,
+                  total_spend: s.total_spend
+              };
+          });
+          setPriors(updatedPriors);
+      }
+  };
+
+  const [baseSortKey, setBaseSortKey] = useState<string>('t_value');
+  const [baseSortOrder, setBaseSortOrder] = useState<'asc' | 'desc'>('desc');
+
   const handleTrainDLM = async () => {
     setStep('processing_dlm');
     setError('');
 
     try {
+      // Ensure priors exist; if no priors yet, request from backend
+      let currentPriors = priors;
+      if (!currentPriors || currentPriors.length === 0) {
+        const pRes = await axios.post(`${API_URL}/priors`, {
+          date_col: config.dateCol,
+          target_col: config.targetCol,
+          media_config: config.mediaChannels,
+          control_cols: config.controlCols
+        });
+        currentPriors = pRes.data.priors || [];
+        setPriors(currentPriors);
+      }
+      let bestParams = baseModels && selectedBaseModel && baseModels[selectedBaseModel]?.best_params ? baseModels[selectedBaseModel].best_params : undefined;
+      if (selectedBaseModel === 'Ridge' && baseModels?.['Ridge']?.solutions && selectedRidgeAlpha !== undefined) {
+          const solutionKeys = Object.keys(baseModels['Ridge'].solutions);
+          const stringKey = solutionKeys.find(k => parseFloat(k) === selectedRidgeAlpha) || solutionKeys[0];
+          bestParams = baseModels['Ridge'].solutions[stringKey]?.best_params || bestParams;
+      }
       await axios.post(`${API_URL}/train_dlm`, {
         date_col: config.dateCol,
         target_col: config.targetCol,
         media_config: config.mediaChannels,
         control_cols: config.controlCols,
         model_type: config.model_type,
-        priors: priors,
-        best_params: baseModels[selectedBaseModel].best_params
+        priors: currentPriors,
+        ...(bestParams ? { best_params: bestParams } : {})
       });
       
       const res = await axios.get(`${API_URL}/results`);
@@ -286,8 +356,9 @@ function App() {
       // We only have one result now (DLM)
       setStep('dlm_results');
       setActiveTab('preview');
-    } catch (err) {
-      setError('Error al entrenar el modelo DLM.');
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      setError(detail ? `Error al entrenar el modelo DLM: ${detail}` : 'Error al entrenar el modelo DLM.');
       setStep('base_models');
       console.error(err);
     }
@@ -327,8 +398,8 @@ function App() {
                         <span className="text-sm font-medium text-slate-200">{filename}</span>
                     </div>
                  </>
-             )}
-         </div>
+                                     )}
+                                </div>
 
          {step === 'studio' && (
              <div className="absolute left-1/2 transform -translate-x-1/2 flex bg-slate-800 rounded-lg p-1">
@@ -392,7 +463,7 @@ function App() {
                         <h1 className="text-4xl font-bold text-slate-900 mb-4">Carga tus datos históricos</h1>
                         <p className="text-slate-500 text-lg">Comienza tu análisis subiendo un archivo CSV o Excel.</p>
                      </div>
-                     <FileUpload onFileSelect={handleFileUpload} accept=".csv,.xlsx" />
+                     <FileUpload onFileSelect={handleFileUpload} accept=".csv,.xlsx,.xls" />
                      
                      <div className="mt-8 text-center">
                         <button 
@@ -471,6 +542,43 @@ function App() {
                                      </button>
                                  ))}
                              </div>
+                             {selectedBaseModel === 'Ridge' && baseModels?.Ridge?.solutions && (
+                                <div className="flex items-center gap-2">
+                                    <span className="text-sm text-slate-500">Alpha:</span>
+                                    <select 
+                                        value={selectedRidgeAlpha} 
+                                        onChange={(e) => handleRidgeAlphaChange(parseFloat(e.target.value))}
+                                        className="text-sm border border-slate-300 rounded px-2 py-1 bg-white"
+                                    >
+                                        {ridgeAlphaOptions.map(a => (
+                                            <option key={a} value={a}>{a}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                             )}
+                             <div className="flex items-center gap-2 ml-auto">
+                                <span className="text-sm text-slate-500">Ordenar por:</span>
+                                <select 
+                                    value={baseSortKey} 
+                                    onChange={(e) => setBaseSortKey(e.target.value)}
+                                    className="text-sm border border-slate-300 rounded px-2 py-1 bg-white"
+                                >
+                                    <option value="t_value">t-value</option>
+                                    <option value="vif">VIF</option>
+                                    <option value="abs_contribution">Contribución Absoluta</option>
+                                    <option value="pct_contribution">% Contribución</option>
+                                    <option value="total_spend">Gasto Total</option>
+                                    <option value="total_activity">Actividad Total</option>
+                                </select>
+                                <select 
+                                    value={baseSortOrder} 
+                                    onChange={(e) => setBaseSortOrder(e.target.value as 'asc' | 'desc')}
+                                    className="text-sm border border-slate-300 rounded px-2 py-1 bg-white"
+                                >
+                                    <option value="desc">Desc</option>
+                                    <option value="asc">Asc</option>
+                                </select>
+                             </div>
                          </div>
                          
                          <div className="overflow-x-auto">
@@ -483,12 +591,18 @@ function App() {
                                          <th className="p-3 text-sm font-semibold text-slate-700">t-value</th>
                                          <th className="p-3 text-sm font-semibold text-slate-700">VIF</th>
                                          <th className="p-3 text-sm font-semibold text-slate-700">Contribución Absoluta</th>
-                                         <th className="p-3 text-sm font-semibold text-slate-700">Contribución %</th>
-                                         <th className="p-3 text-sm font-semibold text-slate-700">df (Dinámico)</th>
+                                        <th className="p-3 text-sm font-semibold text-slate-700">Contribución %</th>
+                                        <th className="p-3 text-sm font-semibold text-slate-700">Actividad Total</th>
+                                        <th className="p-3 text-sm font-semibold text-slate-700">Gasto Total</th>
                                      </tr>
                                  </thead>
                                  <tbody>
-                                     {priors.map((prior, index) => (
+                                    {[...priors].sort((a, b) => {
+                                        const va = Number((a as Record<string, number>)[baseSortKey] ?? 0);
+                                        const vb = Number((b as Record<string, number>)[baseSortKey] ?? 0);
+                                        const diff = va - vb;
+                                        return baseSortOrder === 'asc' ? diff : -diff;
+                                    }).map((prior, index) => (
                                          <tr key={prior.canal} className="border-b border-slate-100 hover:bg-slate-50/50">
                                              <td className="p-3 text-sm font-medium text-slate-800">{prior.canal}</td>
                                              <td className="p-3">
@@ -513,21 +627,8 @@ function App() {
                                              </td>
                                              <td className="p-3 text-sm text-slate-600">${Math.round(prior.abs_contribution).toLocaleString()}</td>
                                              <td className="p-3 text-sm text-slate-600">{(prior.pct_contribution * 100).toFixed(1)}%</td>
-                                             <td className="p-3">
-                                                <input 
-                                                     type="number"
-                                                     step="0.01"
-                                                     min="0"
-                                                     max="1"
-                                                     value={prior.df} 
-                                                     onChange={(e) => {
-                                                         const newPriors = [...priors];
-                                                         newPriors[index].df = parseFloat(e.target.value) || 0.95;
-                                                         setPriors(newPriors);
-                                                     }}
-                                                     className="w-20 p-1.5 border border-slate-300 rounded focus:ring-mmm-blue-500 focus:border-mmm-blue-500 text-sm"
-                                                 />
-                                             </td>
+                                            <td className="p-3 text-sm text-slate-600">{Math.round(prior.total_activity || 0).toLocaleString()}</td>
+                                            <td className="p-3 text-sm text-slate-600">${Math.round(prior.total_spend || 0).toLocaleString()}</td>
                                          </tr>
                                      ))}
                                  </tbody>
@@ -558,7 +659,7 @@ function App() {
                 <ConfigPanel 
                     columns={columns} 
                     config={config} 
-                    onConfigChange={setConfig} 
+                    onConfigChange={(newConfig) => setConfig(newConfig as typeof config)} 
                     onTrain={handleTrainBaseModels} 
                     onSelectionModeChange={setActiveSelection}
                     activeSelection={activeSelection}
@@ -657,7 +758,8 @@ function App() {
                                         />
                                     </div>
                                 </div>
-                                <div className="p-6">
+                                <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                     <div className="lg:col-span-2">
                                      {resultTab === 'overview' && (
                                         <div className="h-[500px]">
                                              <h3 className="font-bold text-slate-800 mb-4">Descomposición de Ventas (DLM)</h3>
@@ -730,6 +832,44 @@ function App() {
                                                </AreaChart>
                                              </ResponsiveContainer>
                                         </div>
+                                        )}
+                                        {resultTab === 'overview' && (
+                                          <div className="mt-6">
+                                              <h4 className="font-semibold text-slate-800 mb-3">Resumen por Canal</h4>
+                                              <div className="overflow-x-auto">
+                                                  <table className="w-full text-left border-collapse bg-white rounded-xl">
+                                                      <thead>
+                                                          <tr className="bg-slate-50 border-y border-slate-200">
+                                                              <th className="p-3 text-sm font-semibold text-slate-700">Canal</th>
+                                                              <th className="p-3 text-sm font-semibold text-slate-700">Contribución Total</th>
+                                                              <th className="p-3 text-sm font-semibold text-slate-700">Gasto Total</th>
+                                                              <th className="p-3 text-sm font-semibold text-slate-700">ROI</th>
+                                                              <th className="p-3 text-sm font-semibold text-slate-700">Periodos Negativos</th>
+                                                          </tr>
+                                                      </thead>
+                                                      <tbody>
+                                                          {Object.keys((results.decomposition as Array<Record<string, number | string>>)?.[0] || {})
+                                                            .filter(k => ![config.dateCol, 'Unexplained', 'const', 'Base (Trend)', 'Seasonality'].includes(k))
+                                                            .map((key: string) => {
+                                                                const canal = key.replace('_saturated', '');
+                                                                const contrib = (results.decomposition as Array<Record<string, number>>).reduce((acc, row) => acc + (row[key] as number || 0), 0);
+                                                                const negatives = (results.decomposition as Array<Record<string, number>>).reduce((acc, row) => acc + (((row[key] as number) || 0) < 0 ? 1 : 0), 0);
+                                                                const spend = results.roi?.[canal]?.['Total Spend'] || 0;
+                                                                const roi = spend > 0 ? contrib / spend : 0;
+                                                                return (
+                                                                    <tr key={canal} className="border-b border-slate-100">
+                                                                        <td className="p-3 text-sm font-medium text-slate-800">{canal}</td>
+                                                                        <td className="p-3 text-sm text-slate-700">${Math.round(contrib).toLocaleString()}</td>
+                                                                        <td className="p-3 text-sm text-slate-700">${Math.round(spend).toLocaleString()}</td>
+                                                                        <td className="p-3 text-sm text-slate-700">{roi.toFixed(2)}</td>
+                                                                        <td className="p-3 text-sm text-slate-700">{negatives}</td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                      </tbody>
+                                                  </table>
+                                              </div>
+                                          </div>
                                      )}
                                      {resultTab === 'adstock' && (
                                          <div className="h-[500px]">
@@ -802,6 +942,36 @@ function App() {
                                                     <Bar dataKey="roi" fill="#3b82f6" radius={[0, 4, 4, 0]} barSize={30} />
                                                   </BarChart>
                                              </ResponsiveContainer>
+                                             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                                    <h4 className="font-semibold text-slate-800 mb-2">Gasto por Canal</h4>
+                                                    <div className="space-y-2">
+                                                        {Object.entries(results.roi || {}).map(([canal, r]) => {
+                                                            const rr = r as Record<string, number>;
+                                                            return (
+                                                                <div key={canal} className="flex items-center justify-between text-sm">
+                                                                    <span className="text-slate-600">{canal}</span>
+                                                                    <span className="text-slate-800 font-medium">${Math.round(rr['Total Spend'] || 0).toLocaleString()}</span>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                                    <h4 className="font-semibold text-slate-800 mb-2">Contribución Total por Canal</h4>
+                                                    <div className="space-y-2">
+                                                        {Object.entries(results.roi || {}).map(([canal, r]) => {
+                                                            const rr = r as Record<string, number>;
+                                                            return (
+                                                                <div key={canal} className="flex items-center justify-between text-sm">
+                                                                    <span className="text-slate-600">{canal}</span>
+                                                                    <span className="text-slate-800 font-medium">${Math.round(rr['Total Contribution'] || 0).toLocaleString()}</span>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                             </div>
                                          </div>
                                      )}
                                      {resultTab === 'curves' && (
@@ -859,56 +1029,6 @@ function App() {
                                                      <p><strong>VIF (Variance Inflation Factor):</strong> Valores &gt; 10 indican alta multicolinealidad.</p>
                                                      <p><strong>t-value:</strong> Valores absolutos &gt; 1.96 indican significancia estadística (95% confianza).</p>
                                                   </div>
-                                              </div>
-                                              {/* Panel Lateral para Re-entrenar */}
-                                              <div className="w-80 ml-6 bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col">
-                                                  <h4 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
-                                                      <Settings className="w-4 h-4 text-mmm-blue-500" />
-                                                      Modificar Variables
-                                                  </h4>
-                                                  <p className="text-xs text-slate-500 mb-4">Ajusta los valores iniciales y reentrena el modelo DLM para ver cómo cambian los resultados.</p>
-                                                  
-                                                  <div className="flex-1 overflow-y-auto space-y-4 custom-scrollbar pr-2">
-                                                      {priors.map((prior, index) => (
-                                                          <div key={prior.canal} className="bg-white p-3 rounded-lg border border-slate-200">
-                                                              <label className="text-sm font-medium text-slate-700 block mb-2">{prior.canal}</label>
-                                                              <div className="space-y-2">
-                                                                  <div className="flex items-center justify-between text-xs">
-                                                                      <span className="text-slate-500">Beta Inicial:</span>
-                                                                      <input 
-                                                                          type="number" step="any"
-                                                                          value={prior.initial_value}
-                                                                          onChange={(e) => {
-                                                                              const newPriors = [...priors];
-                                                                              newPriors[index].initial_value = parseFloat(e.target.value) || 0;
-                                                                              setPriors(newPriors);
-                                                                          }}
-                                                                          className="w-20 p-1 border border-slate-300 rounded"
-                                                                      />
-                                                                  </div>
-                                                                  <div className="flex items-center justify-between text-xs">
-                                                                      <span className="text-slate-500">SE:</span>
-                                                                      <input 
-                                                                          type="number" step="any"
-                                                                          value={prior.SE}
-                                                                          onChange={(e) => {
-                                                                              const newPriors = [...priors];
-                                                                              newPriors[index].SE = parseFloat(e.target.value) || 0;
-                                                                              setPriors(newPriors);
-                                                                          }}
-                                                                          className="w-20 p-1 border border-slate-300 rounded"
-                                                                      />
-                                                                  </div>
-                                                              </div>
-                                                          </div>
-                                                      ))}
-                                                  </div>
-                                                  <button 
-                                                      onClick={handleTrainDLM}
-                                                      className="mt-4 w-full py-2 bg-mmm-blue-600 hover:bg-mmm-blue-700 text-white rounded-lg font-medium transition-colors"
-                                                  >
-                                                      Re-entrenar DLM
-                                                  </button>
                                               </div>
                                           </div>
                                       )}
@@ -1024,6 +1144,68 @@ function App() {
                                               </div>
                                           </div>
                                       )}
+                                     </div>
+                                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col">
+                                         <h4 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                                             <Settings className="w-4 h-4 text-mmm-blue-500" />
+                                             Re-entrenamiento DLM
+                                         </h4>
+                                         <p className="text-xs text-slate-500 mb-4">Ajusta DF (discount), Beta inicial y SE por canal. Esta barra permanece fija sin importar la pestaña.</p>
+                                         <div className="flex-1 overflow-y-auto space-y-4 custom-scrollbar pr-2">
+                                             {priors.map((prior, index) => (
+                                                 <div key={prior.canal} className="bg-white p-3 rounded-lg border border-slate-200">
+                                                     <label className="text-sm font-medium text-slate-700 block mb-2">{prior.canal}</label>
+                                                     <div className="space-y-2">
+                                                         <div className="flex items-center justify-between text-xs">
+                                                             <span className="text-slate-500">Beta Inicial</span>
+                                                             <input 
+                                                                 type="number" step="any"
+                                                                 value={prior.initial_value}
+                                                                 onChange={(e) => {
+                                                                     const newPriors = [...priors];
+                                                                     newPriors[index].initial_value = parseFloat(e.target.value) || 0;
+                                                                     setPriors(newPriors);
+                                                                 }}
+                                                                 className="w-24 p-1 border border-slate-300 rounded"
+                                                             />
+                                                         </div>
+                                                         <div className="flex items-center justify-between text-xs">
+                                                             <span className="text-slate-500">SE</span>
+                                                             <input 
+                                                                 type="number" step="any"
+                                                                 value={prior.SE}
+                                                                 onChange={(e) => {
+                                                                     const newPriors = [...priors];
+                                                                     newPriors[index].SE = parseFloat(e.target.value) || 0;
+                                                                     setPriors(newPriors);
+                                                                 }}
+                                                                 className="w-24 p-1 border border-slate-300 rounded"
+                                                             />
+                                                         </div>
+                                                         <div className="flex items-center justify-between text-xs">
+                                                             <span className="text-slate-500">DF (discount)</span>
+                                                             <input 
+                                                                 type="number" step="0.01" min="0.01" max="1"
+                                                                 value={prior.df}
+                                                                 onChange={(e) => {
+                                                                     const newPriors = [...priors];
+                                                                     newPriors[index].df = parseFloat(e.target.value) || 0.95;
+                                                                     setPriors(newPriors);
+                                                                 }}
+                                                                 className="w-24 p-1 border border-slate-300 rounded"
+                                                             />
+                                                         </div>
+                                                     </div>
+                                                 </div>
+                                             ))}
+                                         </div>
+                                         <button 
+                                             onClick={handleTrainDLM}
+                                             className="mt-4 w-full py-2 bg-mmm-blue-600 hover:bg-mmm-blue-700 text-white rounded-lg font-medium transition-colors"
+                                         >
+                                             Re-entrenar DLM
+                                         </button>
+                                     </div>
                                 </div>
                             </div>
                         </div>

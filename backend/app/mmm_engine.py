@@ -399,7 +399,9 @@ class MMMBuilder:
                             if r_val > 1.0: r_val = 1.0
                             m0 = [prior.get('initial_value', 0)]
                             # SE to variance
-                            C0 = [[prior.get('SE', 10)**2]]
+                            se_val = float(prior.get('SE', 10))
+                            if se_val <= 0.0001: se_val = 0.0001
+                            C0 = [[se_val**2]]
                             
                     features = [[x] for x in exog_media[col].values]
                     my_dlm = my_dlm + dynamic(features=features, discount=r_val, name=col, m0=m0, C0=C0)
@@ -456,10 +458,13 @@ class MMMBuilder:
             self.model_results = res
             self.model_type = 'OLS'
 
-        # 4. Calculate ROI
+        # 4. Generate decomposition first so ROI and stats can use it
+        self.get_decomposition()
+
+        # 5. Calculate ROI
         self.calculate_roi()
         
-        # 5. Calculate stats (VIF, t-values)
+        # 6. Calculate stats (VIF, t-values, contributions)
         self.channel_stats = self.calculate_channel_stats(exog, endog)
 
     def calculate_channel_stats(self, exog, endog):
@@ -485,6 +490,15 @@ class MMMBuilder:
                 continue
                 
             base_name = col.replace('_saturated', '')
+            
+            # Map base_name to activity and spend columns
+            activity_col = None
+            spend_col = None
+            for m in self.media_config:
+                if m['name'] == base_name:
+                    activity_col = m.get('activity_col')
+                    spend_col = m.get('spend_col')
+                    break
             
             # VIF
             try:
@@ -520,13 +534,20 @@ class MMMBuilder:
                 se = ols_model.bse.get(col, 0)
                 t_val = ols_model.tvalues.get(col, 0)
                 
-            stats.append({
+            entry = {
                 "canal": base_name,
                 "beta": float(beta),
                 "se": float(se),
                 "vif": float(vif),
                 "t_value": float(t_val)
-            })
+            }
+            # Add activity and spend totals if available
+            if activity_col and activity_col in self.data.columns:
+                entry["total_activity"] = float(self.data[activity_col].sum())
+            if spend_col and spend_col in self.data.columns:
+                entry["total_spend"] = float(self.data[spend_col].sum())
+            
+            stats.append(entry)
             
         # Add contribution metrics if decomposition is available
         if self.decomposition is not None:
@@ -873,4 +894,3 @@ class MMMBuilder:
             "optimized_incremental_sales": float(max_incremental),
             "allocation": alloc_results
         }
-

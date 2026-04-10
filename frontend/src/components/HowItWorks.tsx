@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { BookOpen, Database, Sliders, TrendingUp, HelpCircle } from 'lucide-react';
+import { BookOpen, Database, Sliders, TrendingUp } from 'lucide-react';
 
 interface Props {
   onClose?: () => void;

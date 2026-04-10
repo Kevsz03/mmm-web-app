@@ -1,6 +1,24 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import type { ComponentType } from 'react';
 import { cn } from '../lib/utils';
-import { ChevronRight, Plus, X, Search, Settings, HelpCircle, BarChart2, Calendar, Target, DollarSign, Activity, Layers, MousePointerClick, GitBranch, Trash } from 'lucide-react';
+import { ChevronRight, Plus, X, Search, Settings, HelpCircle, BarChart2, Calendar, DollarSign, Activity, Layers, MousePointerClick, Trash } from 'lucide-react';
+
+type SectionHeaderProps = { title: string; icon: ComponentType<{ className?: string }>; active: boolean; onClick: () => void };
+const SectionHeader = ({ title, icon: Icon, active, onClick }: SectionHeaderProps) => (
+  <button
+    onClick={onClick}
+    className={cn(
+      "flex items-center justify-between w-full px-4 py-3 text-sm font-semibold transition-all rounded-lg mb-2",
+      active ? "bg-slate-100 text-slate-900 shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+    )}
+  >
+    <div className="flex items-center gap-3">
+      <Icon className={cn("w-4 h-4", active ? "text-mmm-blue-600" : "text-slate-400")} />
+      {title}
+    </div>
+    <ChevronRight className={cn("w-4 h-4 transition-transform", active ? "rotate-90 text-slate-400" : "text-slate-300")} />
+  </button>
+);
 
 interface Props {
   columns: string[];
@@ -11,7 +29,7 @@ interface Props {
     controlCols: string[];
     model_type?: string;
   };
-  onConfigChange: (newConfig: any) => void;
+  onConfigChange: (newConfig: Props['config']) => void;
   onTrain: () => void;
   onSelectionModeChange: (mode: { field: string, index?: number, subfield?: string } | null) => void;
   activeSelection: { field: string, index?: number, subfield?: string } | null;
@@ -66,21 +84,6 @@ export const ConfigPanel = ({ columns, config, onConfigChange, onTrain, onSelect
       return activeSelection?.field === field && activeSelection?.index === index && activeSelection?.subfield === subfield;
   };
 
-  const SectionHeader = ({ title, icon: Icon, active, onClick }: any) => (
-    <button
-      onClick={onClick}
-      className={cn(
-        "flex items-center justify-between w-full px-4 py-3 text-sm font-semibold transition-all rounded-lg mb-2",
-        active ? "bg-slate-100 text-slate-900 shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"
-      )}
-    >
-      <div className="flex items-center gap-3">
-        <Icon className={cn("w-4 h-4", active ? "text-mmm-blue-600" : "text-slate-400")} />
-        {title}
-      </div>
-      <ChevronRight className={cn("w-4 h-4 transition-transform", active ? "rotate-90 text-slate-400" : "text-slate-300")} />
-    </button>
-  );
 
   return (
     <div className="flex flex-col h-full bg-white border-r border-slate-200 w-80 shadow-xl shadow-slate-200/50 z-20">
@@ -343,6 +346,8 @@ export const ConfigPanel = ({ columns, config, onConfigChange, onTrain, onSelect
             </div>
         )}
         */}
+
+
 
       </div>
 

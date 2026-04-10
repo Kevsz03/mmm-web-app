@@ -5,6 +5,7 @@ import pandas as pd
 import io
 import json
 from .mmm_engine import MMMBuilder
+import numpy as np
 import os
 
 app = FastAPI()
@@ -23,16 +24,44 @@ mmm_model = MMMBuilder()
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+def to_native(obj):
+    try:
+        if isinstance(obj, dict):
+            return {k: to_native(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [to_native(v) for v in obj]
+        if isinstance(obj, np.generic):
+            return obj.item()
+        # pandas Timestamp or datetime-like
+        if hasattr(obj, "isoformat"):
+            try:
+                return obj.isoformat()
+            except:
+                return str(obj)
+        return obj
+    except Exception:
+        return str(obj)
+
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-    if not file.filename.endswith(('.csv', '.xlsx')):
-        raise HTTPException(status_code=400, detail="Invalid file format")
+    fname = file.filename.strip().lower()
+    if not fname.endswith(('.csv', '.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="Formato de archivo inválido. Usa .csv, .xlsx o .xls")
     
     contents = await file.read()
-    if file.filename.endswith('.csv'):
-        df = pd.read_csv(io.BytesIO(contents))
-    else:
-        df = pd.read_excel(io.BytesIO(contents))
+    try:
+        if fname.endswith('.csv'):
+            try:
+                df = pd.read_csv(io.BytesIO(contents))
+            except Exception:
+                try:
+                    df = pd.read_csv(io.StringIO(contents.decode('utf-8')), engine='python')
+                except Exception:
+                    df = pd.read_csv(io.StringIO(contents.decode('latin-1')), engine='python')
+        else:
+            df = pd.read_excel(io.BytesIO(contents))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Archivo no legible: {str(e)}")
     
     # Save to temp file to reload later if needed
     file_path = os.path.join(UPLOAD_DIR, "current_data.csv")
@@ -124,6 +153,7 @@ async def train_base_models(config: dict):
         )
         
         ridge_alpha = config.get('ridge_alpha', 1.0)
+        ridge_alphas = config.get('ridge_alphas', None)
         
         global base_model_variations
         base_model_variations = {}
@@ -132,14 +162,36 @@ async def train_base_models(config: dict):
         
         for method in methods:
             print(f"Training base model: {method}...")
-            mmm_model.optimize_hyperparameters(n_trials=20, method=method, ridge_alpha=ridge_alpha)
-            stats = mmm_model.build_base_model(method=method, ridge_alpha=ridge_alpha)
-            
-            base_model_variations[method] = {
-                "stats": stats,
-                "best_params": mmm_model.best_params.copy(),
-                "method": method
-            }
+            if method == 'Ridge' and ridge_alphas and isinstance(ridge_alphas, list) and len(ridge_alphas) > 0:
+                solutions = {}
+                default_alpha = float(ridge_alphas[0])
+                for a in ridge_alphas:
+                    a_val = float(a)
+                    mmm_model.optimize_hyperparameters(n_trials=20, method=method, ridge_alpha=a_val)
+                    stats = mmm_model.build_base_model(method=method, ridge_alpha=a_val)
+                    solutions[a_val] = {
+                        "stats": stats,
+                        "best_params": mmm_model.best_params.copy(),
+                        "method": method,
+                        "ridge_alpha": a_val
+                    }
+                # Provide a default top-level view using first alpha for backward compatibility
+                base_model_variations[method] = {
+                    "stats": solutions[default_alpha]["stats"],
+                    "best_params": solutions[default_alpha]["best_params"],
+                    "method": method,
+                    "ridge_alpha": default_alpha,
+                    "solutions": solutions
+                }
+            else:
+                mmm_model.optimize_hyperparameters(n_trials=20, method=method, ridge_alpha=ridge_alpha)
+                stats = mmm_model.build_base_model(method=method, ridge_alpha=ridge_alpha)
+                base_model_variations[method] = {
+                    "stats": stats,
+                    "best_params": mmm_model.best_params.copy(),
+                    "method": method,
+                    "ridge_alpha": ridge_alpha if method == 'Ridge' else None
+                }
         
         return {"status": "success", "models": base_model_variations}
     except Exception as e:
@@ -213,16 +265,24 @@ async def train_dlm(config: dict):
             
             saturation_curves[name] = [{"x": float(x), "y": float(y)} for x, y in zip(x_vals, y_vals)]
 
+        # Adstock data and best params sanitization
+        adstock_data = mmm_model.get_adstock_data()
+        for row in adstock_data:
+            val = row.get(mmm_model.date_col)
+            if hasattr(val, 'isoformat'):
+                row[mmm_model.date_col] = val.isoformat()
+        best_params_native = {k: float(v) if isinstance(v, (int, float, np.generic)) else v for k, v in mmm_model.best_params.items()}
+
         global dlm_results
         dlm_results = {
-            "diagnostics": diagnostics,
-            "decomposition": decomposition_dict,
-            "roi": roi,
-            "channel_stats": channel_stats,
-            "best_params": mmm_model.best_params.copy(),
-            "saturation_curves": saturation_curves,
+            "diagnostics": to_native(diagnostics),
+            "decomposition": to_native(decomposition_dict),
+            "roi": to_native(roi),
+            "channel_stats": to_native(channel_stats),
+            "best_params": to_native(best_params_native),
+            "saturation_curves": to_native(saturation_curves),
             "optimization_method": "DLM",
-            "adstock_data": mmm_model.get_adstock_data()
+            "adstock_data": to_native(adstock_data)
         }
         
         return {"status": "success", "message": "DLM trained successfully"}
